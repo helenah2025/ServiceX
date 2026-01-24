@@ -17,7 +17,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pathlib import Path
 import sqlite3
 
@@ -64,6 +64,132 @@ class DatabaseManager:
             networks.append(config)
 
         return networks
+
+    def add_network(
+        self,
+        name: str,
+        address: str,
+        port: int,
+        use_ssl: bool,
+        nicknames: str,
+        ident: str,
+        realname: str,
+        services_username: str = "",
+        services_password: str = "",
+        oper_username: str = "",
+        oper_password: str = "",
+        command_trigger: str = "!"
+    ) -> int:
+        try:
+            ssl_str = "yes" if use_ssl else "no"
+
+            self.cursor.execute(
+                '''INSERT INTO ircNetworks 
+                   (networkName, networkAddress, networkPort, networkSSL,
+                    nicknames, ident, realname,
+                    servicesUsername, servicesPassword,
+                    operUsername, operPassword, commandTrigger)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (name, address, port, ssl_str, nicknames, ident, realname,
+                 services_username, services_password, oper_username,
+                 oper_password, command_trigger)
+            )
+            self.connection.commit()
+
+            network_id = self.cursor.lastrowid
+            Logger.info(f"Added network '{name}' with ID {network_id}")
+            return network_id
+
+        except sqlite3.Error as e:
+            Logger.error(f"Failed to add network: {e}")
+            raise
+
+    def remove_network(self, network_id: int) -> bool:
+        try:
+            # First, remove associated channels
+            self.cursor.execute(
+                'DELETE FROM ircChannels WHERE networkID=?',
+                (network_id,)
+            )
+
+            # Remove associated plugins
+            self.cursor.execute(
+                'DELETE FROM plugins WHERE networkID=?',
+                (network_id,)
+            )
+
+            # Remove the network
+            self.cursor.execute(
+                'DELETE FROM ircNetworks WHERE networkID=?',
+                (network_id,)
+            )
+
+            rows_affected = self.cursor.rowcount
+            self.connection.commit()
+
+            if rows_affected > 0:
+                Logger.info(f"Removed network ID {network_id}")
+                return True
+            else:
+                Logger.warning(f"Network ID {network_id} not found")
+                return False
+
+        except sqlite3.Error as e:
+            Logger.error(f"Failed to remove network: {e}")
+            return False
+
+    def update_network(self, network_id: int, updates: Dict[str, Any]) -> bool:
+        try:
+            # Map friendly names to database columns
+            column_map = {
+                'name': 'networkName',
+                'address': 'networkAddress',
+                'port': 'networkPort',
+                'use_ssl': 'networkSSL',
+                'nicknames': 'nicknames',
+                'ident': 'ident',
+                'realname': 'realname',
+                'services_username': 'servicesUsername',
+                'services_password': 'servicesPassword',
+                'oper_username': 'operUsername',
+                'oper_password': 'operPassword',
+                'command_trigger': 'commandTrigger'
+            }
+
+            # Build UPDATE query
+            set_clauses = []
+            values = []
+
+            for key, value in updates.items():
+                db_column = column_map.get(key, key)
+
+                # Convert boolean to yes/no for SSL
+                if key == 'use_ssl':
+                    value = "yes" if value else "no"
+
+                set_clauses.append(f"{db_column}=?")
+                values.append(value)
+
+            if not set_clauses:
+                return False
+
+            values.append(network_id)
+            query = f"UPDATE ircNetworks SET {', '.join(set_clauses)} WHERE networkID=?"
+
+            self.cursor.execute(query, values)
+            rows_affected = self.cursor.rowcount
+            self.connection.commit()
+
+            if rows_affected > 0:
+                Logger.info(f"Updated network ID {network_id}")
+                return True
+            else:
+                Logger.warning(f"Network ID {network_id} not found")
+                return False
+
+        except sqlite3.Error as e:
+            Logger.error(f"Failed to update network: {e}")
+            return False
 
     def get_channels(self, network_id: int) -> List[str]:
         self.cursor.execute(

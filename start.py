@@ -19,12 +19,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 from pathlib import Path
-from twisted.internet import reactor, ssl
+from twisted.internet import reactor
 
 from core import (
     Logger,
     DatabaseManager,
-    Factory
+    NetworkManager
 )
 
 
@@ -45,29 +45,19 @@ def main():
         Logger.error("Failed to connect to database")
         return
 
+    # Create network manager
+    network_manager = NetworkManager(db)
+
     # Load network configurations
-    networks = db.get_networks()
-    Logger.info(f"IRC network configurations loaded: {len(networks)}")
+    networks = network_manager.load_networks()
 
-    # Create connections for each network
-    for network_config in networks:
-        factory = Factory(network_config, db)
+    if not networks:
+        Logger.error("No networks configured in database")
+        return
 
-        if network_config.use_ssl:
-            reactor.connectSSL(
-                network_config.address,
-                network_config.port,
-                factory,
-                ssl.ClientContextFactory()
-            )
-        else:
-            reactor.connectTCP(
-                network_config.address,
-                network_config.port,
-                factory
-            )
-
-        Logger.info(f"Connecting to IRC network: {network_config.name}")
+    # Connect to all networks
+    Logger.info(f"Connecting to {len(networks)} network(s)...")
+    network_manager.connect_all()
 
     # Start reactor
     reactor.run()

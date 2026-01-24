@@ -35,7 +35,8 @@ class Protocol(irc.IRCClient):
 
     def __init__(self):
         super().__init__()
-        self.plugin_manager = PluginManager()
+        # Don't create plugin_manager here - it will be set by factory
+        self.plugin_manager: Optional[PluginManager] = None
         self.scheduler = TaskScheduler()
         self.db: Optional[DatabaseManager] = None
         self.joined_channels: List[str] = []
@@ -43,14 +44,15 @@ class Protocol(irc.IRCClient):
     def connectionMade(self):
         irc.IRCClient.connectionMade(self)
         Logger.info(
-            f"Connected to IRC network: {self.factory.config.name}"
+            f"Connected to IRC network: {self.factory.config.name} "
             f"({self.factory.config.address}:{self.factory.config.port})"
         )
 
-        # Load enabled plugins
+        # Load enabled plugins for this network if not already loaded
         enabled_plugins = self.db.get_enabled_plugins(self.factory.config.id)
         for plugin_name in enabled_plugins:
-            self.plugin_manager.load_plugin(plugin_name)
+            if plugin_name not in self.plugin_manager.loaded_plugins:
+                self.plugin_manager.load_plugin(plugin_name)
 
     def connectionLost(self, reason):
         irc.IRCClient.connectionLost(self, reason)
@@ -89,12 +91,12 @@ class Protocol(irc.IRCClient):
         return new_nickname
 
     def joined(self, channel: str):
-        Logger.info(f"Joined channel: {channel}")
+        Logger.info(f"[{self.factory.config.name}] Joined channel: {channel}")
         if channel not in self.joined_channels:
             self.joined_channels.append(channel)
 
     def left(self, channel: str):
-        Logger.info(f"Left channel: {channel}")
+        Logger.info(f"[{self.factory.config.name}] Left channel: {channel}")
         if channel in self.joined_channels:
             self.joined_channels.remove(channel)
 
@@ -108,7 +110,7 @@ class Protocol(irc.IRCClient):
             Logger.info(f"Already in channel: {channel}")
             return
 
-        Logger.info(f"Joining channel: {channel}")
+        Logger.info(f"[{self.factory.config.name}] Joining channel: {channel}")
         self.join(channel)
 
         if save_to_db:
@@ -124,7 +126,7 @@ class Protocol(irc.IRCClient):
             Logger.info(f"Not in channel: {channel}")
             return
 
-        Logger.info(f"Leaving channel: {channel}")
+        Logger.info(f"[{self.factory.config.name}] Leaving channel: {channel}")
         self.leave(channel)
 
         if save_to_db:
@@ -195,7 +197,8 @@ class Protocol(irc.IRCClient):
             Logger.info(f"Unknown command '{command}' from {nickname}")
             self.send_message(target, "Command not found", nickname)
         else:
-            Logger.info(f"Executed command '{command}' from {nickname}")
+            Logger.info(
+                f"[{self.factory.config.name}] Executed command '{command}' from {nickname}")
 
     def noticed(self, user: str, channel: str, message: str):
         if user == "NickServ!services@services.":

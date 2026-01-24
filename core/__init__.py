@@ -25,6 +25,7 @@ from .database_manager import DatabaseManager
 from .plugin_manager import PluginManager
 from .protocol import Protocol
 from .factory import Factory
+from .network_manager import NetworkManager
 
 __all__ = [
     'NetworkConfig',
@@ -37,4 +38,5 @@ __all__ = [
     'PluginManager',
     'Protocol',
     'Factory',
+    'NetworkManager',
 ]
