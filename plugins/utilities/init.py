@@ -337,10 +337,10 @@ def handle_plugin_list(bot, target: str, nickname: str, args: List[str]):
         plugin_list = ", ".join(plugins)
         bot.send_message(
             target,
-            f"Loaded plugins: {plugin_list}",
+            f"Success: loaded plugins: {plugin_list}",
             nickname)
     else:
-        bot.send_message(target, "No plugins loaded", nickname)
+        bot.send_message(target, "Info: no plugins loaded", nickname)
 
 def handle_plugin_load(bot, target: str, nickname: str, args: List[str]):
     if not args:
@@ -350,10 +350,10 @@ def handle_plugin_load(bot, target: str, nickname: str, args: List[str]):
     for plugin_name in args:
         if bot.plugin_manager.load_plugin(plugin_name):
             bot.send_message(
-                target, f"Loaded plugin: {plugin_name}", nickname)
+                target, f"Success: loaded plugin: {plugin_name}", nickname)
         else:
             bot.send_message(
-                target, f"Failed to load: {plugin_name}", nickname)
+                target, f"Error: failed to load: {plugin_name}", nickname)
 
 def handle_plugin_unload(bot, target: str, nickname: str, args: List[str]):
     if not args:
@@ -363,10 +363,10 @@ def handle_plugin_unload(bot, target: str, nickname: str, args: List[str]):
     for plugin_name in args:
         if bot.plugin_manager.unload_plugin(plugin_name):
             bot.send_message(
-                target, f"Unloaded plugin: {plugin_name}", nickname)
+                target, f"Success: unloaded plugin: {plugin_name}", nickname)
         else:
             bot.send_message(
-                target, f"Failed to unload: {plugin_name}", nickname)
+                target, f"Error: failed to unload: {plugin_name}", nickname)
 
 def handle_plugin_enable(bot, target: str, nickname: str, args: List[str]):
     if not args:
@@ -378,7 +378,7 @@ def handle_plugin_enable(bot, target: str, nickname: str, args: List[str]):
             bot.factory.config.id, plugin_name, enabled=True)
         bot.send_message(
             target,
-            f"Enabled plugin: {plugin_name}",
+            f"Success: enabled plugin: {plugin_name}",
             nickname)
 
 def handle_plugin_disable(bot, target: str, nickname: str, args: List[str]):
@@ -391,7 +391,7 @@ def handle_plugin_disable(bot, target: str, nickname: str, args: List[str]):
             bot.factory.config.id, plugin_name, enabled=False)
         bot.send_message(
             target,
-            f"Disabled plugin: {plugin_name}",
+            f"Success: disabled plugin: {plugin_name}",
             nickname)
 
 

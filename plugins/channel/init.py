@@ -88,12 +88,12 @@ def handle_join(bot, target: str, nickname: str, args: List[str]):
     if not channel_name.startswith('#'):
         bot.send_message(
             target,
-            f"Invalid channel name: {channel_name}",
+            f"Error: invalid channel name: {channel_name}",
             nickname)
         return
 
     # Send confirmation and then join channel
-    bot.send_message(target, f"Joining channel: {channel_name}", nickname)
+    bot.send_message(target, f"Success: joining channel: {channel_name}", nickname)
     bot.join_channel(channel_name, save_to_db=True)
 
 
@@ -111,12 +111,12 @@ def handle_part(bot, target: str, nickname: str, args: List[str]):
     if not channel_name.startswith('#'):
         bot.send_message(
             target,
-            f"Invalid channel name: {channel_name}",
+            f"Error: invalid channel name: {channel_name}",
             nickname)
         return
 
     # Send confirmation and then part channel
-    bot.send_message(target, f"Parting channel: {channel_name}", nickname)
+    bot.send_message(target, f"Success: parting channel: {channel_name}", nickname)
     bot.part_channel(channel_name, save_to_db=True)
 
 
@@ -134,12 +134,12 @@ def handle_cycle(bot, target: str, nickname: str, args: List[str]):
     if not channel_name.startswith('#'):
         bot.send_message(
             target,
-            f"Invalid channel name: {channel_name}",
+            f"Error: invalid channel name: {channel_name}",
             nickname)
         return
 
     # Send confirmation and then cycle channel
-    bot.send_message(target, f"Cycling channel: {channel_name}", nickname)
+    bot.send_message(target, f"Success: cycling channel: {channel_name}", nickname)
     bot.leave(channel_name)
     bot.join(channel_name)
 
