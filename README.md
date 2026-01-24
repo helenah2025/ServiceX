@@ -1,7 +1,7 @@
 # Dunamis
 Dunamis is a modular, database-driven IRC bot built with Python 3 and the Twisted library. With its plugin architecture, Dunamis can be easily extended to suit your needs.
 
-Originally developed as a pseudo-service for the DGS (Dead Gnome Society) IRC network, it was created to replace our Limnoria bot called X, which handled channel statistics and polling but had certain hardcoded limitations.
+Was originally called ServiceX, and developed as a pseudo-service for the DGS (Dead Gnome Society) IRC network, it was created to replace our Limnoria bot called X, which handled channel statistics and polling but had certain hardcoded limitations.
 
 **Note:** The [original repository](https://github.com/DGS-Dead-Gnome-Society/ServiceX) is no longer maintained and contains outdated code.
 
