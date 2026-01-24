@@ -72,7 +72,7 @@ def format_task_list(tasks: List[Any]) -> str:
     for task in tasks:
         task_type = "Periodic" if task.periodic else "Once"
         lines.append(
-            f"ID: {task.id:<10}, Name: {task.name:<20}, State: {task.state.name:<12}, Type: {task_type:<10}, Runs: {task.run_count:<6}")
+            f"ID: {task.id}, Name: {task.name}, State: {task.state.name}, Type: {task_type}, Runs: {task.run_count}")
 
     return "\n".join(lines)
 
