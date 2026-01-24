@@ -38,7 +38,6 @@ PLUGIN_INFO = {
     "description": "Entertainment and novelty commands"
 }
 
-
 # Block style
 DIGIT_ART_BLOCK: Dict[str, Tuple[str, ...]] = {
     '0': ('██████', '██  ██', '██  ██', '██  ██', '██████'),
@@ -70,7 +69,6 @@ DIGIT_ART_BRAILLE: Dict[str, Tuple[str, ...]] = {
     ':': ('⢀⡀', '⢈⡁', '⠈⠁'),
 }
 
-
 # Style registry
 DIGIT_STYLES = {
     'block': DIGIT_ART_BLOCK,
@@ -79,6 +77,58 @@ DIGIT_STYLES = {
 
 
 DEFAULT_STYLE = 'block'
+
+
+# Border styles
+BORDER_STYLES = {
+    'single': {
+        'tl': '┌', 'tr': '┐', 'bl': '└', 'br': '┘',
+        'h': '─', 'v': '│'
+    },
+    'double': {
+        'tl': '╔', 'tr': '╗', 'bl': '╚', 'br': '╝',
+        'h': '═', 'v': '║'
+    },
+    'rounded': {
+        'tl': '╭', 'tr': '╮', 'bl': '╰', 'br': '╯',
+        'h': '─', 'v': '│'
+    },
+    'heavy': {
+        'tl': '┏', 'tr': '┓', 'bl': '┗', 'br': '┛',
+        'h': '━', 'v': '┃'
+    },
+}
+
+
+def add_border(lines: List[str], border_style: str) -> List[str]:
+    if not lines:
+        return lines
+
+    if border_style not in BORDER_STYLES:
+        return lines
+
+    border = BORDER_STYLES[border_style]
+
+    # Calculate the width needed (longest line)
+    max_width = max(len(line) for line in lines)
+
+    # Pad all lines to same width
+    padded_lines = [line + ' ' * (max_width - len(line)) for line in lines]
+
+    # Create bordered output
+    bordered = []
+
+    # Top border
+    bordered.append(border['tl'] + border['h'] * (max_width + 2) + border['tr'])
+
+    # Content with side borders
+    for line in padded_lines:
+        bordered.append(border['v'] + ' ' + line + ' ' + border['v'])
+
+    # Bottom border
+    bordered.append(border['bl'] + border['h'] * (max_width + 2) + border['br'])
+
+    return bordered
 
 
 def render_ascii_text(
@@ -180,9 +230,10 @@ def command_why(bot, target: str, nickname: str, args: List[str]):
 def command_digits(bot, target: str, nickname: str, args: List[str]):
     style = DEFAULT_STYLE
     use_braille_blank = False
+    border_style = None
 
     try:
-        opts, remaining_args = getopt(args, "s:b", ["style=", "braille-blank"])
+        opts, remaining_args = getopt(args, "s:bd:", ["style=", "braille-blank", "border="])
     except GetoptError as e:
         bot.send_message(target, f"Invalid option: {e}", nickname)
         return
@@ -195,13 +246,23 @@ def command_digits(bot, target: str, nickname: str, args: List[str]):
                 available = ', '.join(DIGIT_STYLES.keys())
                 bot.send_message(
                     target,
-                    f"Unknown style '{arg}'. Available: {available}",
+                    f"Error: unknown style: {arg} - available styles: {available}",
                     nickname
                 )
                 return
-
         elif opt in ("-b", "--braille-blank"):
             use_braille_blank = True
+        elif opt in ("-d", "--border"):
+            if arg in BORDER_STYLES:
+                border_style = arg
+            else:
+                available = ', '.join(BORDER_STYLES.keys())
+                bot.send_message(
+                    target,
+                    f"Error: unknown border: {arg} - available borders: {available}",
+                    nickname
+                )
+                return
 
     if not remaining_args:
         bot.send_message(target, "Usage: digits [-s STYLE] [-b] NUMBER [NUMBER...]", nickname)
@@ -227,6 +288,10 @@ def command_digits(bot, target: str, nickname: str, args: List[str]):
     if use_braille_blank:
         lines = [line.replace(' ', '\u2800') for line in lines]
 
+    # Add border if requested
+    if border_style:
+        lines = add_border(lines, border_style)
+
     for line in lines:
         bot.send_message(target, line, nickname)
 
@@ -235,9 +300,10 @@ def command_digiclock(bot, target: str, nickname: str, args: List[str]):
     timezone_arg = None
     style = DEFAULT_STYLE
     use_braille_blank = False
+    border_style = None
 
     try:
-        opts, _ = getopt(args, "t:s:b", ["timezone=", "style=", "braille-blank"])
+        opts, _ = getopt(args, "t:s:bd:", ["timezone=", "style=", "braille-blank", "border="])
     except GetoptError as e:
         bot.send_message(target, f"Invalid option: {e}", nickname)
         return
@@ -252,13 +318,23 @@ def command_digiclock(bot, target: str, nickname: str, args: List[str]):
                 available = ', '.join(DIGIT_STYLES.keys())
                 bot.send_message(
                     target,
-                    f"Unknown style '{arg}'. Available: {available}",
+                    f"Error: unknown style: {arg} - available styles: {available}",
                     nickname
                 )
                 return
-
         elif opt in ("-b", "--braille-blank"):
             use_braille_blank = True
+        elif opt in ("-d", "--border"):
+            if arg in BORDER_STYLES:
+                border_style = arg
+            else:
+                available = ', '.join(BORDER_STYLES.keys())
+                bot.send_message(
+                    target,
+                    f"Error: unknown border: {arg} - available borders: {available}",
+                    nickname
+                )
+                return
 
     # Get current time
     try:
@@ -280,6 +356,10 @@ def command_digiclock(bot, target: str, nickname: str, args: List[str]):
     # Replace spaces with braille blank if requested
     if use_braille_blank:
         lines = [line.replace(' ', '\u2800') for line in lines]
+
+    # Add border if requested
+    if border_style:
+        lines = add_border(lines, border_style)
 
     for line in lines:
         bot.send_message(target, line, nickname)
