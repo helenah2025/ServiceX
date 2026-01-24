@@ -51,7 +51,7 @@ class DatabaseManager:
                 name=row[1],
                 address=row[2],
                 port=row[3],
-                use_ssl=(row[4] == "yes"),
+                enable_ssl=(row[4] == "yes"),
                 nicknames=row[5].split(', '),
                 ident=row[6],
                 realname=row[7],
@@ -70,7 +70,7 @@ class DatabaseManager:
         name: str,
         address: str,
         port: int,
-        use_ssl: bool,
+        enable_ssl: bool,
         nicknames: str,
         ident: str,
         realname: str,
@@ -81,11 +81,11 @@ class DatabaseManager:
         command_trigger: str = "!"
     ) -> int:
         try:
-            ssl_str = "yes" if use_ssl else "no"
+            ssl_str = "yes" if enable_ssl else "no"
 
             self.cursor.execute(
                 '''INSERT INTO irc_networks
-                   (name, address, port, ssl,
+                   (name, address, port, enable_ssl,
                     nicknames, ident, realname,
                     services_username, services_password,
                     oper_username, oper_password, command_trigger)
@@ -120,7 +120,7 @@ class DatabaseManager:
 
             # Remove the network
             self.cursor.execute(
-                'DELETE FROM irc_networks WHERE ID=?',
+                'DELETE FROM irc_networks WHERE id=?',
                 (network_id,)
             )
 
@@ -145,7 +145,7 @@ class DatabaseManager:
                 'name': 'name',
                 'address': 'address',
                 'port': 'port',
-                'use_ssl': 'ssl',
+                'enable_ssl': 'enable_ssl',
                 'nicknames': 'nicknames',
                 'ident': 'ident',
                 'realname': 'realname',
@@ -164,7 +164,7 @@ class DatabaseManager:
                 db_column = column_map.get(key, key)
 
                 # Convert boolean to yes/no for SSL
-                if key == 'use_ssl':
+                if key == 'enable_ssl':
                     value = "yes" if value else "no"
 
                 set_clauses.append(f"{db_column}=?")

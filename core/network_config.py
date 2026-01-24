@@ -28,7 +28,7 @@ class NetworkConfig:
     name: str
     address: str
     port: int
-    use_ssl: bool
+    enable_ssl: bool
     nicknames: List[str]
     ident: str
     realname: str

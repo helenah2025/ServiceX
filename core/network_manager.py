@@ -56,7 +56,7 @@ class NetworkManager:
         self.factories[network_id] = factory
 
         try:
-            if network_config.use_ssl:
+            if network_config.enable_ssl:
                 connector = reactor.connectSSL(
                     network_config.address,
                     network_config.port,
@@ -125,7 +125,7 @@ class NetworkManager:
             "name": network.name,
             "address": network.address,
             "port": network.port,
-            "ssl": network.use_ssl,
+            "ssl": network.enable_ssl,
             "connected": is_connected,
         }
 

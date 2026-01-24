@@ -1,5 +1,5 @@
 """
-ServiceX IRC Bot - Factory (Updated)
+ServiceX IRC Bot - Factory
 
 Copyright (C) 2026 Helenah, Helena Bolan <helenah2025@proton.me>
 
@@ -30,7 +30,7 @@ from .plugin_manager import PluginManager
 class Factory(protocol.ClientFactory):
     protocol_class = Protocol
 
-    def __init__(self, config: NetworkConfig, db: DatabaseManager, 
+    def __init__(self, config: NetworkConfig, db: DatabaseManager,
                  plugin_manager: Optional[PluginManager] = None,
                  network_manager = None):
         self.config = config
@@ -48,7 +48,7 @@ class Factory(protocol.ClientFactory):
         proto.realname = self.config.realname
         proto.db = self.db
         proto.plugin_manager = self.plugin_manager  # Use shared plugin manager
-        
+
         # Store reference to protocol
         self.protocol = proto
         return proto
@@ -56,7 +56,7 @@ class Factory(protocol.ClientFactory):
     def clientConnectionLost(self, connector, reason):
         Logger.warning(
             f"Connection lost to {self.config.name}: {reason.getErrorMessage()}")
-        
+
         if self.should_reconnect:
             Logger.info(f"Reconnecting to {self.config.name}...")
             connector.connect()
@@ -66,7 +66,7 @@ class Factory(protocol.ClientFactory):
     def clientConnectionFailed(self, connector, reason):
         Logger.error(
             f"Connection failed to {self.config.name}: {reason.getErrorMessage()}")
-        
+
         if self.should_reconnect:
             Logger.info(f"Retrying connection to {self.config.name}...")
             connector.connect()
