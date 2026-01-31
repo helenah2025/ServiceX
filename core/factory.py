@@ -40,6 +40,13 @@ class Factory(protocol.ClientFactory):
         self.protocol = None
         self.should_reconnect = True
 
+        # Connection retry tracking
+        self.current_address = config.primary_address
+        self.current_port = config.primary_port
+        self.retry_delay = 5.0  # Initial retry delay in seconds
+        self.max_retry_delay = 300.0  # Maximum retry delay (5 minutes)
+        self.retry_count = 0
+
     def buildProtocol(self, addr):
         proto = self.protocol_class()
         proto.factory = self
@@ -57,18 +64,64 @@ class Factory(protocol.ClientFactory):
         Logger.warning(
             f"Connection lost to {self.config.name}: {reason.getErrorMessage()}")
 
-        if self.should_reconnect:
-            Logger.info(f"Reconnecting to {self.config.name}...")
-            connector.connect()
+        if self.should_reconnect and self.config.auto_reconnect:
+            # Reset retry tracking on successful disconnection after being connected
+            # (protocol was created means we had a successful connection)
+            if self.protocol is not None:
+                self.retry_count = 0
+                self.retry_delay = 5.0
+                Logger.info(f"Reconnecting to {self.config.name} in {self.retry_delay} seconds...")
+              #  connector.connect()
+            else:
+                # Never successfully connected, rotate to next address/port
+                self._rotate.connection_target()
+                Logger.info(f"Retrying {self.config.name} with {self.current_address}:{self.current_port} in {self.retry_delay} seconds...")
+
+            # Schedule reconnection with delay
+            reactor.callLater(self.retry_delay, connector.connect)
         else:
-            Logger.info(f"Not reconnecting to {self.config.name} (disabled)")
+            Logger.info(f"Not reconnecting to {self.config.name} (reconnect disabled)")
 
     def clientConnectionFailed(self, connector, reason):
         Logger.error(
-            f"Connection failed to {self.config.name}: {reason.getErrorMessage()}")
+            f"Connection failed to {self.config.name} ({self.current_address}:{self.current_port}): {reason.getErrorMessage()}")
 
-        if self.should_reconnect:
-            Logger.info(f"Retrying connection to {self.config.name}...")
-            connector.connect()
+        if self.should_reconnect and self.config.auto_reconnect:
+            # Rotate to next address/port combination
+            self._rotate_connection_target()
+
+            # Increase retry delay with exponential backoff
+            self.retry_count += 1
+            self.retry_delay = min(self.retry_delay * 1.5, self.max_retry_delay)
+
+            Logger.info(
+                f"Retrying connection to {self.config.name} "
+                f"({self.current_address}:{self.current_port}) "
+                f"in {self.retry_delay:.1f} seconds (attempt #{self.retry_count})..."
+            )
+
+            # Schedule reconnection with delay
+            reactor.callLater(self.retry_delay, connector.connect)
         else:
-            Logger.info(f"Not retrying connection to {self.config.name} (disabled)")
+            Logger.info(f"Not retrying connection to {self.config.name} (reconnect disabled)")
+
+    def _rotate_connection_target(self):
+
+        # First try next port on current address
+        next_port = self.config.get_next_port(self.current_port)
+
+        # If we've cycled through all ports, move to next address
+        if next_port == self.config.primary_port or next_port == self.current_port:
+            self.current_address = self.config.get_next_address(self.current_address)
+            self.current_port = self.config.primary_port
+            Logger.debug(f"Rotating to next address: {self.current_address}")
+        else:
+            self.current_port = next_port
+            Logger.debug(f"Rotating to next port: {self.current_port}")
+
+        # Update network manager's tracked address if available
+        if self.network_manager:
+            self.network_manager.connected_addresses[self.config.id] = (
+                self.current_address,
+                self.current_port
+            )

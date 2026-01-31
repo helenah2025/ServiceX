@@ -55,7 +55,9 @@ def command_channel(bot, target: str, nickname: str, args: List[str]):
         "cycle": handle_cycle,
         "list": handle_list,
         "info": handle_info,
-        "autojoin": handle_autojoin,
+        "add": handle_add,
+        "remove": handle_remove,
+        "modify": handle_modify,
     }
 
     subcommand_list = ", ".join(handlers.keys())
@@ -76,217 +78,442 @@ def command_channel(bot, target: str, nickname: str, args: List[str]):
 
 
 def handle_join(bot, target: str, nickname: str, args: List[str]):
-    if args:
-        channel_name = args[0]
-    else:
-        # Default to current target if in a channel
-        if target.startswith('#'):
-            channel_name = target
-        else:
-            bot.send_message(target, "Usage: channel join [channel]", nickname)
-            return
-
-    if not channel_name.startswith('#'):
-        bot.send_message(
-            target,
-            f"Error: invalid channel name: {channel_name}",
-            nickname)
+    usage = "Usage: channel join <channel_id>"
+    if not args:
+        bot.send_message(target, usage, nickname)
         return
 
-    # Send confirmation and then join channel
-    bot.send_message(target, f"Success: joining channel: {channel_name}", nickname)
-    bot.join_channel(channel_name, save_to_db=True)
+    try:
+        channel_id = int(args[0])
+    except ValueError:
+        bot.send_message(target, usage, nickname)
+        return
+
+    # Join the channel
+    bot.join_channel(channel_id, save_to_db=False)
+    bot.send_message(target, f"Success: joining channel ID '{channel_id}'", nickname)
 
 
 def handle_part(bot, target: str, nickname: str, args: List[str]):
-    if args:
-        channel_name = args[0]
-    else:
-        # Default to current target if in a channel
-        if target.startswith('#'):
-            channel_name = target
-        else:
-            bot.send_message(target, "Usage: channel part [channel]", nickname)
-            return
-
-    if not channel_name.startswith('#'):
-        bot.send_message(
-            target,
-            f"Error: invalid channel name: {channel_name}",
-            nickname)
+    usage = "Usage: channel part <channel_id>"
+    if not args:
+        bot.send_message(target, usage, nickname)
         return
 
-    # Send confirmation and then part channel
-    bot.send_message(target, f"Success: parting channel: {channel_name}", nickname)
-    bot.part_channel(channel_name, save_to_db=True)
+    try:
+        channel_id = int(args[0])
+    except ValueError:
+        bot.send_message(target, usage, nickname)
+        return
+
+    # Part the channel
+    bot.part_channel(channel_id, save_to_db=False)
+    bot.send_message(target, f"Success: joining channel ID '{channel_id}'", nickname)
 
 
 def handle_cycle(bot, target: str, nickname: str, args: List[str]):
     if args:
-        channel_name = args[0]
-    else:
-        # Default to current target if in a channel
-        if target.startswith('#'):
-            channel_name = target
-        else:
-            bot.send_message(target, "Usage: channel cycle [channel]", nickname)
+        try:
+            channel_id = int(args[0])
+        except ValueError:
+            bot.send_message(target, "Usage: channel cycle <channel_id>", nickname)
             return
 
-    if not channel_name.startswith('#'):
-        bot.send_message(
-            target,
-            f"Error: invalid channel name: {channel_name}",
-            nickname)
+    # Find the channel
+    all_networks = bot.db.get_networks()
+    channel_info = None
+    network_id = None
+
+    for network in all_networks:
+        channels = bot.db.get_channels(network.id)
+        for ch in channels:
+            if ch['id'] == channel_id and ch['network_id'] == network.id:
+                channel_info = ch
+                network_id = network.id
+                break
+        if channel_info:
+            break
+
+    if not channel_info:
+        bot.send_message(target, f"Error channel ID '{channel_id}' not found in database", nickname)
         return
 
-    # Send confirmation and then cycle channel
-    bot.send_message(target, f"Success: cycling channel: {channel_name}", nickname)
-    bot.leave(channel_name)
-    bot.join(channel_name)
+    bot.send_message(target, f"Success: channel ID '{channel_id}' cycled", nickname)
+    bot.part_channel(channel_id, save_to_db=False)
+    bot.join_channel(channel_id, save_to_db=False)
 
 
 def handle_list(bot, target: str, nickname: str, args: List[str]):
-    mode = args[0].lower() if args else "simple"
-    channels = sorted(bot.joined_channels)
+    # Show all channels from database across all networks
+    network_manager = None
+    if hasattr(bot, 'factory') and hasattr(bot.factory, 'network_manager'):
+        network_manager = bot.factory.network_manager
 
-    if mode == "count":
-        # Just show the count
-        count = len(channels)
-        bot.send_message(target, count, nickname)
+    # Get all networks
+    all_networks = bot.db.get_networks()
 
-    elif mode == "fancy":
-        # Natural language description
-        message = format_channel_list(channels)
-        bot.send_message(target, message, nickname)
+    if not all_networks:
+        bot.send_message(target, "No networks configured", nickname)
+        return
 
-    elif mode == "simple":
-        # Simple comma-separated list
-        if channels:
-            bot.send_message(target, ", ".join(channels), nickname)
-        else:
-            bot.send_message(target, "Not in any channels", nickname)
+    all_channels = []
+    for network in all_networks:
+        channels = bot.db.get_channels(network.id)
+        for ch in channels:
+            # Check if currently joined
+            is_joined = False
+            if network_manager:
+                protocol = network_manager.get_protocol(network.id)
+                if protocol and hasattr(protocol, 'joined_channels'):
+                    is_joined = ch['name'] in protocol.joined_channels
 
-    else:
-        # Unknown mode
+            all_channels.append({
+                'id': ch['id'],
+                'name': ch['name'],
+                'network_id': network.id,
+                'network_name': network.name,
+                'joined': is_joined,
+                'auto_join': ch['auto_join'],
+                'auto_rejoin': ch['auto_rejoin'],
+                'logging': ch['enable_logging']
+            })
+
+    if not all_channels:
+        bot.send_message(target, "No channels configured in database", nickname)
+        return
+
+    # Format output
+    parts = []
+    for ch in all_channels:
+        status = "Joined" if ch['joined'] else "Not joined"
+        parts.append({
+            'id': ch['id'],
+            'name': ch['name'],
+            'network_id': ch['network_id'],
+            'network_name': ch['network_name'],
+            'status': status
+        })
+
+    parts_sorted = sorted(parts, key=lambda part: part['id'])
+    formatted_parts = []
+
+    for part in parts_sorted:
+        formatted_parts.extend([
+            f"[ ID: {part['id']}, "
+            f"Name: {part['name']}, "
+            f"Network ID: {part['network_id']}, "
+            f"Status: {part['status']} ]"
+        ])
+
+    bot.send_message(target, " -- ".join(formatted_parts), nickname)
+
+
+def handle_info(bot, target: str, nickname: str, args: List[str]):
+    if not args:
+        bot.send_message(target, "Usage: channel info <channel_id>", nickname)
+        return
+
+    try:
+        channel_id = int(args[0])
+    except ValueError:
         bot.send_message(
             target,
-            f"Unknown mode: {mode}. Use: simple, count, or fancy",
+            f"Error: invalid channel ID: {args[0]}",
+            nickname)
+        return
+
+    # Get all networks
+    all_networks = bot.db.get_networks()
+
+    # Search across all networks for the channel ID
+    channel_info = None
+    network_info = None
+
+    for network in all_networks:
+        channels = bot.db.get_channels(network.id)
+        for ch in channels:
+            if ch['id'] == channel_id:
+                channel_info = ch
+                network_info = network
+                break
+        if channel_info:
+            break
+
+    if not channel_info:
+        bot.send_message(
+            target,
+            f"Error: channel ID {channel_id} not found in database",
+            nickname)
+        return
+
+    channel_name = channel_info['name']
+
+    # Check if bot is currently in the channel
+    status = "Unknown"
+    if network_info.id == bot.factory.config.id:
+        if channel_name in bot.joined_channels:
+            status = "Joined"
+        else:
+            status = "Not joined"
+    else:
+        # Check if the network is connected
+        network_manager = None
+        if hasattr(bot, 'factory') and hasattr(bot.factory, 'network_manager'):
+            network_manager = bot.factory.network_manager
+
+        if network_manager:
+            protocol = network_manager.get_protocol(network_info.id)
+            if protocol and hasattr(protocol, 'joined_channels'):
+                if channel_name in protocol.joined_channels:
+                    status = "Joined"
+                else:
+                    status = "Not joined"
+            else:
+                status = "Network not connected"
+
+    parts = [
+        f"ID: {channel_info['id']}",
+        f"Name: {channel_name}",
+        f"Network ID: {network_info.id}",
+        f"Status: {status}",
+        f"Auto-Join: {'Yes' if channel_info['auto_join'] else 'No'}",
+        f"Auto-Rejoin: {'Yes' if channel_info['auto_rejoin'] else 'No'}",
+        f"Logging: {'Yes' if channel_info['enable_logging'] else 'No'}",
+    ]
+
+    # Add optional fields if they exist
+    if channel_info.get('command_prefix'):
+        parts.append(f"Command Prefix: {channel_info['command_prefix']}")
+    if channel_info.get('last_topic'):
+        parts.append(f"Last Topic: {channel_info['last_topic']}")
+    if channel_info.get('last_modes'):
+        parts.append(f"Last Modes: {channel_info['last_modes']}")
+
+    bot.send_message(target, ", ".join(parts), nickname)
+
+
+def handle_add(bot, target: str, nickname: str, args: List[str]):
+    if args:
+        channel_name = args[0]
+        args = args[1:]
+    else:
+        bot.send_message(target, "Usage: channel add <channel_name> <flags>", nickname)
+        return
+
+    # Parse options
+    network_id = None
+    password = ""
+    auto_join = True
+    auto_rejoin = False
+    enable_logging = True
+    command_prefix = None
+
+    try:
+        opts, remaining = getopt(
+            args,
+            "n:p:",
+            [
+                "network=", "password=",
+                "auto-join=", "auto-rejoin=",
+                "logging=", "prefix="
+            ]
+        )
+
+        for opt, arg in opts:
+            if opt in ("-n", "--network"):
+                network_id = int(arg)
+            elif opt in ("-p", "--password"):
+                password = arg
+            elif opt == "--auto-join":
+                auto_join = arg.lower() in ['true', 'yes', '1']
+            elif opt == "--auto-rejoin":
+                auto_rejoin = arg.lower() in ['true', 'yes', '1']
+            elif opt == "--logging":
+                enable_logging = arg.lower() in ['true', 'yes', '1']
+            elif opt == "--prefix":
+                command_prefix = arg
+
+    except GetoptError as e:
+        bot.send_message(target, f"Error: invalid option: {e}", nickname)
+        return
+    except ValueError as e:
+        bot.send_message(target, f"Error: invalid value: {e}", nickname)
+        return
+
+    # Validate required fields
+    if not channel_name:
+        bot.send_message(target, "Error: channel name required (-c CHANNEL)", nickname)
+        return
+
+    if not channel_name.startswith('#'):
+        bot.send_message(target, f"Error: invalid channel name: {channel_name}", nickname)
+        return
+
+    # Default to current network if not specified
+    if network_id is None:
+        network_id = bot.factory.config.id
+
+    # Add channel to database
+    if bot.db.add_channel(
+        network_id=network_id,
+        channel_name=channel_name,
+        password=password,
+        auto_join=auto_join,
+        auto_rejoin=auto_rejoin,
+        enable_logging=enable_logging,
+        command_prefix=command_prefix
+    ):
+        bot.send_message(
+            target,
+            f"Success: channel '{channel_name}' added to database under network ID '{network_id}'",
+            nickname
+        )
+    else:
+        bot.send_message(
+            target,
+            f"Error: channel '{channel_name}' already exists in database under network ID '{network_id}'",
             nickname
         )
 
 
-def handle_info(bot, target: str, nickname: str, args: List[str]):
-    if args:
-        channel_name = args[0]
-    else:
-        # Default to current target if in a channel
-        if target.startswith('#'):
-            channel_name = target
-        else:
-            bot.send_message(target, "Usage: channel info [channel]", nickname)
-            return
-
-    if not channel_name.startswith('#'):
-        bot.send_message(
-            target,
-            f"Invalid channel name: {channel_name}",
-            nickname)
+def handle_remove(bot, target: str, nickname: str, args: List[str]):
+    if not args:
+        bot.send_message(target, "Usage: channel remove <channel_id>", nickname)
         return
 
-    # Check if bot is in the channel
-    if channel_name in bot.joined_channels:
-        status = "Joined"
+    try:
+        channel_id = int(args[0])
+    except ValueError:
+        bot.send_message(target, f"Error: invalid channel ID: {args[0]}", nickname)
+        return
+
+    # Find the channel
+    all_networks = bot.db.get_networks()
+    channel_info = None
+    network_info = None
+
+    for network in all_networks:
+        channels = bot.db.get_channels(network.id)
+        for ch in channels:
+            if ch['id'] == channel_id:
+                channel_info = ch
+                network_info = network
+                break
+        if channel_info:
+            break
+
+    if not channel_info:
+        bot.send_message(target, f"Error: channel ID '{channel_id}' not found in database", nickname)
+        return
+
+    channel_name = channel_info['name']
+
+    # Remove from database
+    if bot.db.remove_channel(network_info.id, channel_id):
+        bot.send_message(
+            target,
+            f"Success: channel ID '{channel_id}' removed from database",
+            nickname
+        )
+
+        # If this is the current network and bot is in the channel, part it
+        if network_info.id == bot.factory.config.id and channel_name in bot.joined_channels:
+            bot.send_message(target, f"Parting channel {channel_name} (removed from database)", nickname)
+            bot.leave(channel_name)
+        # If it's a different network but connected, part it there
+        elif hasattr(bot, 'factory') and hasattr(bot.factory, 'network_manager'):
+            network_manager = bot.factory.network_manager
+            protocol = network_manager.get_protocol(network_info.id)
+            if protocol and hasattr(protocol, 'joined_channels'):
+                if channel_name in protocol.joined_channels:
+                    protocol.leave(channel_name)
     else:
-        status = "Not joined"
-
-    # Check if channel is in database
-    channels_in_db = bot.db.get_channels(bot.factory.config.id)
-    in_database = "Yes" if channel_name in channels_in_db else "No"
-
-    info = (
-        f"Channel: {channel_name}\n"
-        f"Status: {status}\n"
-        f"Auto-join: {in_database}"
-    )
-
-    bot.send_message(target, info, nickname)
+        bot.send_message(target, f"Error: failed to remove channel from database", nickname)
 
 
-def handle_autojoin(bot, target: str, nickname: str, args: List[str]):
-    if args:
-        channel_name = args[0]
-        autojoin = args[1].lower()
-    else:
-        bot.send_message(target, "Usage: channel autojoin [channel] <true|false>", nickname)
+def handle_modify(bot, target: str, nickname: str, args: List[str]):
+    if not args:
+        bot.send_message(target, "Usage: channel modify <channel_id> [OPTIONS]", nickname)
+        return
 
-    if autojoin == "true":
-        # Default to current target if in a channel
-        if target.startswith('#'):
-            channel_name = target
+    try:
+        channel_id = int(args[0])
+    except ValueError:
+        bot.send_message(target, f"Error: invalid channel ID: {args[0]}", nickname)
+        return
+
+    remaining_args = args[1:]
+
+    if not remaining_args:
+        bot.send_message(target, "Error: no modifications specified", nickname)
+        return
+
+    # Find the channel
+    all_networks = bot.db.get_networks()
+    channel_info = None
+    network_info = None
+
+    for network in all_networks:
+        channels = bot.db.get_channels(network.id)
+        for ch in channels:
+            if ch['id'] == channel_id:
+                channel_info = ch
+                network_info = network
+                break
+        if channel_info:
+            break
+
+    if not channel_info:
+        bot.send_message(target, f"Error: channel ID {channel_id} not found", nickname)
+        return
+
+    channel_name = channel_info['name']
+
+    # Parse modification options
+    updates = {}
+
+    try:
+        opts, _ = getopt(
+            remaining_args,
+            "p:",
+            [
+                "password=", "auto-join=", "auto-rejoin=",
+                "logging=", "prefix="
+            ]
+        )
+
+        for opt, arg in opts:
+            if opt in ("-p", "--password"):
+                updates['password'] = arg
+            elif opt == "--auto-join":
+                updates['auto_join'] = arg.lower() in ('true', 'yes', '1')
+            elif opt == "--auto-rejoin":
+                updates['auto_rejoin'] = arg.lower() in ('true', 'yes', '1')
+            elif opt == "--logging":
+                updates['enable_logging'] = arg.lower() in ('true', 'yes', '1')
+            elif opt == "--prefix":
+                updates['command_prefix'] = arg
+
+    except GetoptError as e:
+        bot.send_message(target, f"Error: invalid option: {e}", nickname)
+        return
+
+    # Update database
+    try:
+        if bot.db.update_channel(network_info.id, channel_name, updates):
+            bot.send_message(
+                target,
+                f"Success: modified channel '{channel_name}' (ID: {channel_id})",
+                nickname
+            )
         else:
-            bot.send_message(target, "Usage: chansave [channel]", nickname)
-            return
+            bot.send_message(target, f"Error: failed to update channel", nickname)
 
-        if not channel_name.startswith('#'):
-            bot.send_message(
-                target,
-                f"Invalid channel name: {channel_name}",
-                nickname)
-            return
-
-        # Check if already in database
-        channels_in_db = bot.db.get_channels(bot.factory.config.id)
-
-        if channel_name in channels_in_db:
-            bot.send_message(
-                target,
-                f"Channel {channel_name} already saved",
-                nickname)
-        else:
-            bot.db.add_channel(bot.factory.config.id, channel_name)
-            bot.send_message(
-                target,
-                f"Added channel {channel_name} to auto-join list",
-                nickname)
-
-    if autojoin == "false":
-        # Default to current target if in a channel
-        if target.startswith('#'):
-            channel_name = target
-        else:
-            bot.send_message(target, "Usage: chanunsave [channel]", nickname)
-            return
-
-        if not channel_name.startswith('#'):
-            bot.send_message(
-                target,
-                f"Invalid channel name: {channel_name}",
-                nickname)
-            return
-
-        # Check if in database
-        channels_in_db = bot.db.get_channels(bot.factory.config.id)
-
-        if channel_name not in channels_in_db:
-            bot.send_message(
-                target,
-                f"Channel {channel_name} not in auto-join list",
-                nickname)
-        else:
-            bot.db.remove_channel(bot.factory.config.id, channel_name)
-            bot.send_message(
-                target,
-                f"Removed {channel_name} from auto-join list",
-                nickname)
+    except Exception as e:
+        bot.send_message(target, f"Error: failed to modify channel: {e}", nickname)
 
 
 __all__ = [
     'PLUGIN_INFO',
     'command_channel',
-    'handle_join',
-    'handle_part',
-    'handle_cycle',
-    'handle_list',
-    'handle_info',
-    'handle_autojoin',
 ]

@@ -25,7 +25,7 @@ from getopt import getopt, GetoptError
 PLUGIN_INFO = {
     "name": "Network",
     "author": "Helenah, Helena Bolan",
-    "version": "1.0",
+    "version": "2.0",
     "description": "IRC network management commands"
 }
 
@@ -37,34 +37,60 @@ def get_network_manager(bot):
 
 
 def format_network_info(status: dict) -> str:
-    lines = [
-        f"Network: {status['name']} (ID: {status['id']})",
-        f"  Address: {status['address']}:{status['port']}",
-        f"  SSL: {'Yes' if status['ssl'] else 'No'}",
-        f"  Status: {'Connected' if status['connected'] else 'Disconnected'}",
+    parts = [
+        f"ID: {status['id']}",
+        f"Name: {status['name']}",
+        f"Addresses: {', '.join(status['addresses'])}",
     ]
 
+    # Show both port lists
+    if status.get('ports'):
+        parts.append(f"Standard Ports: {', '.join(map(str, status['ports']))}")
+    if status.get('ssl_ports'):
+        parts.append(f"SSL Ports: {', '.join(map(str, status['ssl_ports']))}")
+
+    parts.extend([
+        f"SSL: {'Yes' if status['ssl'] else 'No'}",
+        f"Auto-connect: {'Yes' if status['auto_connect'] else 'No'}",
+        f"Auto-reconnect: {'Yes' if status['auto_reconnect'] else 'No'}",
+        f"Connection Status: {'Connected' if status['connected'] else 'Disconnected'}",
+    ])
+
+    # Show connected server if connected
+    if status.get('connected_address'):
+        parts.append(f"Connected to: {status['connected_address']}:{status['connected_port']}")
+
+    # Auth mechanism
+    auth_names = {0: "None", 1: "SASL", 2: "NickServ", 3: "Custom"}
+    parts.append(f"Authentication Mechanism: {auth_names.get(status['auth_mechanism'], 'Unknown')}")
+
     if status.get('nickname'):
-        lines.append(f"  Nickname: {status['nickname']}")
+        parts.append(f"Nickname: {status['nickname']}")
+
+    if status.get('sasl_authenticated'):
+        parts.append(f"SASL: Authenticated")
 
     if status.get('channels'):
         channel_list = ', '.join(status['channels'])
-        lines.append(f"  Channels: {channel_list}")
+        parts.append(f"Channels: {channel_list}")
 
-    return '\n'.join(lines)
+    return ', '.join(parts)
 
 
 def format_network_list(networks: List[dict]) -> str:
     if not networks:
         return "No networks configured"
 
-    lines = []
+    parts = []
     for net in networks:
-        lines.append(
-            f"ID: {net['id']}, Name: {net['name']}, Address: {net['address']}, Port: {net['port']}"
-        )
+        status = "Connected" if net['connected'] else "Disconnected"
+        parts.extend([
+            f"[ ID: {net['id']}, "
+            f"Name: {net['name']}, "
+            f"Status: {status} ]"
+        ])
 
-    return '\n'.join(lines)
+    return ' -- '.join(parts)
 
 
 def command_network(bot, target: str, nickname: str, args: List[str]):
@@ -239,96 +265,125 @@ def handle_current(bot, target: str, nickname: str, args: List[str]):
 
 
 def handle_add(bot, target: str, nickname: str, args: List[str]):
+    if args:
+        network_name = args[0]
+        args = args[1:]
+    else:
+        bot.send_message(target, "Usage: network add <network_name> <flags>", nickname)
+        return
+
     network_manager = get_network_manager(bot)
 
     # Parse options
-    name = None
-    address = None
-    port = None
-    enable_ssl = False
-    nicknames = "Dunamis"
+    addresses = None
+    ports = None
+    ssl_ports = None
+    enable_ssl = True
+    auto_connect = True
+    auto_reconnect = True
+    nicknames = None
     ident = "dunamis"
     realname = "Dunamis IRC Bot"
-    services_user = ""
-    services_pass = ""
+    auth_user = ""
+    auth_pass = ""
+    auth_mech = 1  # SASL by default
+    sasl_mech = 1  # PLAIN by default
+    oper_auth = False
     oper_user = ""
     oper_pass = ""
-    trigger = "!"
+    prefix = "!"
 
     try:
-        opts, _ = getopt(
+        opts, remaining = getopt(
             args,
-            "n:a:p:s",
+            "a:p:s:",
             [
-                "name=", "address=", "port=", "ssl",
+                "addresses=", "ports=", "ssl-ports=", "ssl=",
+                "auto-connect=", "auto-reconnect=",
                 "nick=", "ident=", "realname=",
-                "services-user=", "services-pass=",
-                "oper-user=", "oper-pass=",
-                "trigger="
+                "auth-user=", "auth-pass=", "auth-mech=", "sasl-mech=",
+                "oper", "oper-user=", "oper-pass=",
+                "prefix="
             ]
         )
 
         for opt, arg in opts:
-            if opt in ("-n", "--name"):
-                name = arg
-            elif opt in ("-a", "--address"):
-                address = arg
-            elif opt in ("-p", "--port"):
-                port = int(arg)
+            if opt in ("-a", "--addresses"):
+                addresses = [a.strip() for a in arg.split(',')]
+            elif opt in ("-p", "--ports"):
+                ports = [int(p.strip()) for p in arg.split(',')]
+            elif opt == "--ssl-ports":
+                ssl_ports = [int(p.strip()) for p in arg.split(',')]
             elif opt in ("-s", "--ssl"):
-                enable_ssl = True
+                enable_ssl = arg.lower() in ['true', 'yes', '1']
+            elif opt == "--auto-connect":
+                auto_connect = arg.lower() in ['true', 'yes', '1']
+            elif opt == "--auto-reconnect":
+                auto_reconnect = arg.lower() in ['true', 'yes', '1']
             elif opt == "--nick":
-                nicknames = arg
+                nicknames = [n.strip() for n in arg.split(',')]
             elif opt == "--ident":
                 ident = arg
             elif opt == "--realname":
                 realname = arg
-            elif opt == "--services-user":
-                services_user = arg
-            elif opt == "--services-pass":
-                services_pass = arg
+            elif opt == "--auth-user":
+                auth_user = arg
+            elif opt == "--auth-pass":
+                auth_pass = arg
+            elif opt == "--auth-mech":
+                auth_mech = int(arg)
+            elif opt == "--sasl-mech":
+                sasl_mech = int(arg)
+            elif opt == "--oper":
+                oper_auth = True
             elif opt == "--oper-user":
                 oper_user = arg
             elif opt == "--oper-pass":
                 oper_pass = arg
-            elif opt == "--trigger":
-                trigger = arg
+            elif opt == "--prefix":
+                prefix = arg
 
     except GetoptError as e:
         bot.send_message(target, f"Error: invalid option: {e}", nickname)
         return
-    except ValueError:
-        bot.send_message(target, "Error: port must be a number", nickname)
+    except ValueError as e:
+        bot.send_message(target, f"Error: invalid value: {e}", nickname)
         return
 
     # Validate required fields
-    if not name:
-        bot.send_message(target, "Error: network name required (-n NAME)", nickname)
+    if not addresses:
+        bot.send_message(target, "Error: server address(es) required (-a ADDRESSES)", nickname)
         return
 
-    if not address:
-        bot.send_message(target, "Error: server address required (-a ADDRESS)", nickname)
-        return
-
-    # Set default port based on SSL
-    if port is None:
-        port = 6697 if enable_ssl else 6667
+    # Set defaults
+    if ports is None:
+        ports = [6667]
+    if ssl_ports is None:
+        ssl_ports = [6697]
+    if nicknames is None:
+        nicknames = ["Dunamis", "Dunamis_", "Dunamis__"]
 
     # Add network to database
     try:
         network_id = bot.db.add_network(
-            name=name,
-            address=address,
-            port=port,
+            name=network_name,
+            addresses=addresses,
+            ports=ports,
+            ssl_ports=ssl_ports,
             enable_ssl=enable_ssl,
+            auto_connect=auto_connect,
+            auto_reconnect=auto_reconnect,
             nicknames=nicknames,
             ident=ident,
             realname=realname,
-            services_username=services_user,
-            services_password=services_pass,
+            auth_mechanism=auth_mech,
+            sasl_mechanism=sasl_mech,
+            auth_username=auth_user,
+            auth_password=auth_pass,
+            oper_auth=oper_auth,
             oper_username=oper_user,
             oper_password=oper_pass,
-            command_trigger=trigger
+            command_prefix=prefix
         )
 
         # Reload networks in network manager
@@ -336,7 +391,7 @@ def handle_add(bot, target: str, nickname: str, args: List[str]):
 
         bot.send_message(
             target,
-            f"Success: added network '{name}' (ID: {network_id}). Use 'network connect {network_id}' to connect.",
+            f"Success: added network ID '{network_id}' to database. Use 'network connect {network_id}' to connect.",
             nickname
         )
 
@@ -348,7 +403,7 @@ def handle_remove(bot, target: str, nickname: str, args: List[str]):
     network_manager = get_network_manager(bot)
 
     if not args:
-        bot.send_message(target, "Usage: network remove NETWORK_ID", nickname)
+        bot.send_message(target, "Usage: network remove <channel_id>", nickname)
         return
 
     try:
@@ -368,14 +423,18 @@ def handle_remove(bot, target: str, nickname: str, args: List[str]):
 
     # Remove from database
     try:
-        network_name = network_manager.networks.get(network_id, {}).get('name', str(network_id))
+        network_name = network_manager.networks.get(network_id)
+        if network_name:
+            network_name = network_name.name
+        else:
+            network_name = str(network_id)
 
         if bot.db.remove_network(network_id):
             # Reload networks
             network_manager.load_networks()
             bot.send_message(
                 target,
-                f"Success: removed network '{network_name}' (ID: {network_id})",
+                f"Success: removed network ID '{network_id}' from database",
                 nickname
             )
         else:
@@ -412,45 +471,58 @@ def handle_modify(bot, target: str, nickname: str, args: List[str]):
             remaining_args,
             "n:a:p:s:",
             [
-                "name=", "address=", "port=", "ssl=",
+                "name=", "addresses=", "ports=", "ssl-ports=", "ssl=",
+                "auto-connect=", "auto-reconnect=",
                 "nick=", "ident=", "realname=",
-                "services-user=", "services-pass=",
-                "oper-user=", "oper-pass=",
-                "trigger="
+                "auth-user=", "auth-pass=", "auth-mech=", "sasl-mech=",
+                "oper=", "oper-user=", "oper-pass=",
+                "prefix="
             ]
         )
 
         for opt, arg in opts:
             if opt in ("-n", "--name"):
                 updates['name'] = arg
-            elif opt in ("-a", "--address"):
-                updates['address'] = arg
-            elif opt in ("-p", "--port"):
-                updates['port'] = int(arg)
+            elif opt in ("-a", "--addresses"):
+                updates['addresses'] = [a.strip() for a in arg.split(',')]
+            elif opt in ("-p", "--ports"):
+                updates['ports'] = [int(p.strip()) for p in arg.split(',')]
+            elif opt == "--ssl-ports":
+                updates['ssl_ports'] = [int(p.strip()) for p in arg.split(',')]
             elif opt in ("-s", "--ssl"):
                 updates['enable_ssl'] = arg.lower() in ('true', 'yes', '1')
+            elif opt == "--auto-connect":
+                updates['auto_connect'] = arg.lower() in ('true', 'yes', '1')
+            elif opt == "--auto-reconnect":
+                updates['auto_reconnect'] = arg.lower() in ('true', 'yes', '1')
             elif opt == "--nick":
-                updates['nicknames'] = arg
+                updates['nicknames'] = [n.strip() for n in arg.split(',')]
             elif opt == "--ident":
                 updates['ident'] = arg
             elif opt == "--realname":
                 updates['realname'] = arg
-            elif opt == "--services-user":
-                updates['services_username'] = arg
-            elif opt == "--services-pass":
-                updates['services_password'] = arg
+            elif opt == "--auth-user":
+                updates['auth_username'] = arg
+            elif opt == "--auth-pass":
+                updates['auth_password'] = arg
+            elif opt == "--auth-mech":
+                updates['auth_mechanism'] = int(arg)
+            elif opt == "--sasl-mech":
+                updates['sasl_mechanism'] = int(arg)
+            elif opt == "--oper":
+                updates['oper_auth'] = arg.lower() in ('true', 'yes', '1')
             elif opt == "--oper-user":
                 updates['oper_username'] = arg
             elif opt == "--oper-pass":
                 updates['oper_password'] = arg
-            elif opt == "--trigger":
-                updates['command_trigger'] = arg
+            elif opt == "--prefix":
+                updates['command_prefix'] = arg
 
     except GetoptError as e:
         bot.send_message(target, f"Error: invalid option: {e}", nickname)
         return
     except ValueError:
-        bot.send_message(target, "Error: port must be a number", nickname)
+        bot.send_message(target, "Error: invalid value for numeric field", nickname)
         return
 
     # Warn if network is connected

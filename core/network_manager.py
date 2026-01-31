@@ -33,6 +33,7 @@ class NetworkManager:
         self.networks: Dict[int, NetworkConfig] = {}
         self.factories: Dict[int, Factory] = {}
         self.connectors: Dict[int, any] = {}
+        self.connected_addresses: Dict[int, tuple] = {}
         self.plugin_manager = PluginManager()
 
     def load_networks(self) -> List[NetworkConfig]:
@@ -42,7 +43,8 @@ class NetworkManager:
         Logger.info(f"Loaded {len(networks)} network configurations")
         return networks
 
-    def connect_network(self, network_id: int) -> bool:
+    def connect_network(self, network_id: int, address_idx: int = 0,
+                       port_idx: int = 0) -> bool:
         if network_id not in self.networks:
             Logger.error(f"Network {network_id} not found")
             return False
@@ -52,26 +54,47 @@ class NetworkManager:
             return False
 
         network_config = self.networks[network_id]
+
+        # Check if auto-connect is disabled
+        if not network_config.auto_connect:
+            Logger.info(f"Skipping network {network_config.name} (auto_connect disabled)")
+            return False
+
         factory = Factory(network_config, self.db, self.plugin_manager, self)
         self.factories[network_id] = factory
 
         try:
+            # Get address and port to try
+            if address_idx >= len(network_config.addresses):
+                address_idx = 0
+            address = network_config.addresses[address_idx]
+
             if network_config.enable_ssl:
+                if port_idx >= len(network_config.ssl_ports):
+                    port_idx = 0
+                port = network_config.ssl_ports[port_idx]
+
                 connector = reactor.connectSSL(
-                    network_config.address,
-                    network_config.port,
+                    address,
+                    port,
                     factory,
                     ssl.ClientContextFactory()
                 )
             else:
+                if port_idx >= len(network_config.ports):
+                    port_idx = 0
+                port = network_config.ports[port_idx]
+
                 connector = reactor.connectTCP(
-                    network_config.address,
-                    network_config.port,
+                    address,
+                    port,
                     factory
                 )
 
             self.connectors[network_id] = connector
-            Logger.info(f"Connecting to network: {network_config.name}")
+            # Store the connected address and port
+            self.connected_addresses[network_id] = (address, port)
+            Logger.info(f"Connecting to network: {network_config.name} ({address}:{port})")
             return True
 
         except Exception as e:
@@ -85,10 +108,12 @@ class NetworkManager:
 
         try:
             connector = self.connectors[network_id]
+            network_config = self.networks[network_id]
 
-            # Mark factory to not reconnect if requested
-            if not reconnect and network_id in self.factories:
-                self.factories[network_id].should_reconnect = False
+            # Check if auto-reconnect should be honored
+            if not reconnect and not network_config.auto_reconnect:
+                if network_id in self.factories:
+                    self.factories[network_id].should_reconnect = False
 
             connector.disconnect()
 
@@ -96,9 +121,10 @@ class NetworkManager:
                 del self.connectors[network_id]
                 if network_id in self.factories:
                     del self.factories[network_id]
+                if network_id in self.connected_addresses:
+                    del self.connected_addresses[network_id]
 
-            network_name = self.networks[network_id].name
-            Logger.info(f"Disconnected from network: {network_name}")
+            Logger.info(f"Disconnected from network: {network_config.name}")
             return True
 
         except Exception as e:
@@ -107,7 +133,6 @@ class NetworkManager:
 
     def reconnect_network(self, network_id: int) -> bool:
         if network_id in self.connectors:
-            # Disconnect first, allowing reconnect
             if not self.disconnect_network(network_id, reconnect=True):
                 return False
 
@@ -123,11 +148,21 @@ class NetworkManager:
         status = {
             "id": network.id,
             "name": network.name,
-            "address": network.address,
-            "port": network.port,
+            "addresses": network.addresses,
+            "ports": network.ports,
+            "ssl_ports": network.ssl_ports,
             "ssl": network.enable_ssl,
+            "auto_connect": network.auto_connect,
+            "auto_reconnect": network.auto_reconnect,
             "connected": is_connected,
+            "auth_mechanism": network.auth_mechanism,
         }
+
+        # Add connected server info if connected
+        if is_connected and network_id in self.connected_addresses:
+            address, port = self.connected_addresses[network_id]
+            status["connected_address"] = address
+            status["connected_port"] = port
 
         if is_connected and network_id in self.factories:
             factory = self.factories[network_id]
@@ -135,6 +170,7 @@ class NetworkManager:
                 proto = factory.protocol
                 status["nickname"] = getattr(proto, 'nickname', None)
                 status["channels"] = getattr(proto, 'joined_channels', [])
+                status["sasl_authenticated"] = getattr(proto, 'sasl_authenticated', False)
 
         return status
 
@@ -142,8 +178,12 @@ class NetworkManager:
         return [self.get_network_status(net_id) for net_id in self.networks.keys()]
 
     def connect_all(self):
-        for network_id in self.networks.keys():
-            self.connect_network(network_id)
+        connected = 0
+        for network_id, network in self.networks.items():
+            if network.auto_connect:
+                if self.connect_network(network_id):
+                    connected += 1
+        Logger.info(f"Connected to {connected} networks")
 
     def disconnect_all(self):
         for network_id in list(self.connectors.keys()):
@@ -156,4 +196,25 @@ class NetworkManager:
         factory = self.get_factory(network_id)
         if factory and hasattr(factory, 'protocol'):
             return factory.protocol
+        return None
+
+    def reload_network_config(self, network_id: int) -> bool:
+        try:
+            networks = self.db.get_networks()
+            for network in networks:
+                if network.id == network_id:
+                    self.networks[network_id] = network
+                    Logger.info(f"Reloaded configuration for network {network_id}")
+                    return True
+
+            Logger.warning(f"Network {network_id} not found in database")
+            return False
+        except Exception as e:
+            Logger.error(f"Failed to reload network config: {e}")
+            return False
+
+    def get_network_by_name(self, name: str) -> Optional[NetworkConfig]:
+        for network in self.networks.values():
+            if network.name.lower() == name.lower():
+                return network
         return None

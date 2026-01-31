@@ -102,7 +102,7 @@ def value_network(bot) -> str:
 def command_help(bot, target: str, nickname: str, args: List[str]):
     help_text = (
         f"Hello there, I am a Dunamis bot called {bot.nickname}. "
-        f"For a list of commands, send '{bot.factory.config.command_trigger}commands' "
+        f"For a list of commands, send '!commands' "
         f"into a channel or 'commands' to me as a PM.\n"
         f"For more information: https://github.com/helenah2025/Dunamis/wiki/User-Guide\n"
         f"NOTICE: This project has been totally refactored, the wiki page above does not yet exist.")

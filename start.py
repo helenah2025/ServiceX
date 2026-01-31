@@ -18,6 +18,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import signal
 from pathlib import Path
 from twisted.internet import reactor
 
@@ -55,13 +56,37 @@ def main():
         Logger.error("No networks configured in database")
         return
 
+    # Setup graceful shutdown
+    def shutdown(signum=None, frame=None):
+        Logger.info("Shutdown signal received, cleaning up...")
+        
+        # Disable reconnection for all networks
+        for network_id, factory in network_manager.factories.items():
+            factory.should_reconnect = False
+        
+        # Disconnect all networks
+        network_manager.disconnect_all()
+        
+        # Stop the reactor
+        if reactor.running:
+            reactor.stop()
+        
+        Logger.info("Dunamis shut down gracefully")
+
+    # Register signal handlers for graceful shutdown
+    # Use reactor.addSystemEventTrigger instead of signal handlers
+    # This properly integrates with Twisted's event loop
+    reactor.addSystemEventTrigger('before', 'shutdown', lambda: shutdown())
+
     # Connect to all networks
     Logger.info(f"Connecting to {len(networks)} network(s)...")
     network_manager.connect_all()
 
     # Start reactor
-    reactor.run()
-
+    try:
+        reactor.run()
+    except KeyboardInterrupt:
+        shutdown()
 
 if __name__ == '__main__':
     main()
